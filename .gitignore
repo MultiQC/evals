@@ -175,3 +175,5 @@ cython_debug/
 
 notebooks/tmp/
 notebooks/data/
+
+node_modules/
