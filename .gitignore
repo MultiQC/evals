@@ -177,3 +177,8 @@ notebooks/tmp/
 notebooks/data/
 
 node_modules/
+
+.venv
+data/
+
+.DS_Store
