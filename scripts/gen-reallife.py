@@ -1,31 +1,40 @@
 import math
 from collections import defaultdict
 import os
+from pathlib import Path
+import re
 
 # List files in the directory
-fastqc_dir = "/Users/vlad/Seqera/multiqc_heavy_examples/Petropoulus_2016/fastqc"
-report_files = os.listdir(fastqc_dir)
-
+base_dir = Path("/Users/vlad/Seqera/multiqc_heavy_examples/Petropoulus_2016")
+report_files = os.listdir(base_dir / "fastqc")
 # Extract sample names (e.g., ERX1120885)
 sample_pattern = r"(ERX\d+)\_fastqc\.zip"
 paths = []
-for file in report_files:
-    paths.append(file)
+samples = []
+for path in report_files:
+    match = re.match(sample_pattern, path)
+    if match:
+        samples.append(match.group(1))
+        paths.append(path)
 
 # Sort samples to ensure consistent grouping
-paths.sort()
+samples.sort()
 
 # Calculate roughly how many samples per group (aiming for 8 groups)
 num_groups = 8
-samples_per_group = math.ceil(len(paths) / num_groups)
+samples_per_group = math.ceil(len(samples) / num_groups)
 
 # Create the groups
 sample_groups = defaultdict(list)
-for i, path in enumerate(paths):
+for i, sample in enumerate(samples):
     group_idx = i // samples_per_group
-    sample_groups[f"group_{group_idx + 1}"].append(fastqc_dir + "/" + path)
+    sample_groups[f"group_{group_idx + 1}"].append(sample)
 
 # Generate glob patterns for each group
 group_patterns = {}
+output_dir = "data/reallife"
 for i, (group_name, group_samples) in enumerate(sample_groups.items()):
-    print(f"multiqc -o tmp/runs/run{i + 1} -f --strict {' '.join(group_samples)}")
+    print(
+        f"multiqc {base_dir} -o {output_dir}/run{i + 1} -f --strict {' '.join(f'--only-samples {sample}' for sample in group_samples)}"
+    )
+    
