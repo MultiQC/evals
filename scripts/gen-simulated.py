@@ -5,8 +5,9 @@ import string
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pandas as pd
 from cloudpathlib import S3Path
+import pandas as pd
+from dotenv import load_dotenv
 
 DATASET_NAME = "simulated"
 
@@ -22,11 +23,18 @@ parser.add_argument("--num_modules", type=int, default=10)
 parser.add_argument("--num_sections", type=int, default=5)
 parser.add_argument("--num_samples_per_module", type=int, default=10)
 parser.add_argument("--num_metrics_per_module", type=int, default=50)
+parser.add_argument("--upload", action="store_true")
 args = parser.parse_args()
 
 # Parquet setup
 EXPERIMENT_NAME = f"{args.format}_{args.num_runs}runs_{args.num_modules}mod_{args.num_sections}sec_{args.num_samples_per_module}samples_{args.num_metrics_per_module}metrics"
-target_path = LOCAL_DIR / EXPERIMENT_NAME
+out_path = PARQUET_BUCKET if args.upload else LOCAL_DIR
+target_path = out_path / EXPERIMENT_NAME
+
+
+# Generate random sample names
+def generate_sample_names(num_samples):
+    return [f"sample_{i:03d}" for i in range(1, num_samples + 1)]
 
 
 def generate_random_string(length=10):
@@ -50,6 +58,12 @@ def generate_metric_metadata():
     }
 
 
+# Generate random module names
+def generate_module_names(num_modules):
+    prefixes = ["fastqc", "picard", "samtools", "bcftools", "gatk", "star", "kallisto", "salmon", "kraken", "quast"]
+    return [f"{random.choice(prefixes)}_{i:02d}" for i in range(1, num_modules + 1)]
+
+
 def generate_value_metadata(value):
     """Generate metadata for a value"""
     return {
@@ -59,6 +73,12 @@ def generate_value_metadata(value):
         "val_mod_type": random.choice(["int", "float", "str"]),
         "val_fmt": f"{value:.2f}" if isinstance(value, float) else str(value),
     }
+
+
+# Generate random metric names for a module
+def generate_metric_names(module_name, num_metrics):
+    metric_types = ["quality", "coverage", "count", "percentage", "score", "length", "gc", "reads", "mapped", "error"]
+    return [f"{module_name}_{random.choice(metric_types)}_{i:02d}" for i in range(1, num_metrics + 1)]
 
 
 def generate_sample_data(metric_metadatas: dict[str, dict]):
@@ -433,12 +453,8 @@ def generate_wide_format_files(
         f"Generating wide format parquet files. Num runs: {num_runs}, num modules: {num_modules}, num sections: {num_sections}, num plots: {num_plots}, num samples: {num_samples}, num metrics: {num_metrics}"
     )
 
-    # Create directory if it doesn't exist
-    wide_format_dir = target_path / "wide_format"
-    wide_format_dir.mkdir(parents=True, exist_ok=True)
-
     # Generate data and write files immediately
-    generated_files = generate_wide_format_parquet(num_runs, num_plots, num_samples, num_metrics, wide_format_dir)
+    generated_files = generate_wide_format_parquet(num_runs, num_plots, num_samples, num_metrics, target_path)
 
     print(f"Generated {len(generated_files)} wide format parquet files")
 

@@ -37,4 +37,3 @@ for i, (group_name, group_samples) in enumerate(sample_groups.items()):
     print(
         f"multiqc {base_dir} -o {output_dir}/run{i + 1} -f --strict {' '.join(f'--only-samples {sample}' for sample in group_samples)}"
     )
-    

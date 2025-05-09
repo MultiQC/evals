@@ -17,13 +17,14 @@ dependencies = [
     "kaleido==1.0.0rc11",
     "nbformat>=5.10.4",
     "pymongo>=4.12.0",
-    "pyiceberg[pandas,s3fs]>=0.9.0",
+    "pyiceberg[glue,pandas,s3fs]>=0.9.0",
     "cloudpathlib[s3]>=0.21.0",
     "sqlalchemy>=2.0.40",
     "dotenv>=0.9.9",
     "python-dotenv>=1.1.0",
     "polars>=1.27.1",
     "pyspark>=3.5.5",
+    "natsort>=8.4.0",
 ]
 
 [project.optional-dependencies]
