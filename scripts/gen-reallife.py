@@ -1,39 +1,50 @@
-import math
-from collections import defaultdict
 import os
+import subprocess
 from pathlib import Path
-import re
+import sys
+import dotenv
+import argparse
 
-# List files in the directory
-base_dir = Path("/Users/vlad/Seqera/multiqc_heavy_examples/Petropoulus_2016")
-report_files = os.listdir(base_dir / "fastqc")
-# Extract sample names (e.g., ERX1120885)
-sample_pattern = r"(ERX\d+)\_fastqc\.zip"
-paths = []
-samples = []
-for path in report_files:
-    match = re.match(sample_pattern, path)
-    if match:
-        samples.append(match.group(1))
-        paths.append(path)
+import boto3
 
-# Sort samples to ensure consistent grouping
-samples.sort()
+dotenv.load_dotenv()
 
-# Calculate roughly how many samples per group (aiming for 8 groups)
-num_groups = 8
-samples_per_group = math.ceil(len(samples) / num_groups)
+parser = argparse.ArgumentParser()
+parser.add_argument("--rerun", action="store_true", help="Rerun MultiQC if the parquet file already exists")
+args = parser.parse_args()
 
-# Create the groups
-sample_groups = defaultdict(list)
-for i, sample in enumerate(samples):
-    group_idx = i // samples_per_group
-    sample_groups[f"group_{group_idx + 1}"].append(sample)
+DATASET_NAME = "reallife"
+S3_BUCKET = "vlad-megaqc"
+PROJECTS_DIR = Path("/Users/vlad/Seqera/multiqc_heavy_examples")
 
-# Generate glob patterns for each group
-group_patterns = {}
-output_dir = "data/reallife"
-for i, (group_name, group_samples) in enumerate(sample_groups.items()):
-    print(
-        f"multiqc {base_dir} -o {output_dir}/run{i + 1} -f --strict {' '.join(f'--only-samples {sample}' for sample in group_samples)}"
-    )
+# List of projects to process
+projects = ["Xing2020", "BSstuff", "Petropoulus_2016"]
+
+# Run multiqc on each project
+output_dir = "parquet_runs"
+for project in projects:
+    parquet_file = Path(f"{PROJECTS_DIR}/{output_dir}/{project}_multiqc_report_data/multiqc.parquet")
+    if args.rerun and not parquet_file.exists():
+        print(f"File {parquet_file} does not exist, running MultiQC")
+        cmd = f"multiqc -fv {project}/ -o {output_dir} --title {project}"
+        print(f"Running: {cmd}")
+        subprocess.run(cmd, shell=True, check=True)
+        print(f"Completed MultiQC for {project}")
+    else:
+        print(f"Skipping {project} because it already exists")
+
+# List of expected parquet files
+s3_client = boto3.client("s3")
+
+for project in projects:
+    parquet_file = Path(f"{PROJECTS_DIR}/{output_dir}/{project}_multiqc_report_data/multiqc.parquet")
+
+    if parquet_file.exists():
+        # Upload to S3 with the same path structure
+        s3_key = f"{DATASET_NAME}/{project}/multiqc.parquet"
+
+        print(f"Uploading {parquet_file} to s3://{S3_BUCKET}/{s3_key}")
+        s3_client.upload_file(str(parquet_file), S3_BUCKET, s3_key)
+        print(f"Upload completed for {parquet_file}")
+    else:
+        print(f"Warning: Parquet file not found: {parquet_file}")
