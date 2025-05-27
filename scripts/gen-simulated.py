@@ -5,8 +5,8 @@ import string
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from cloudpathlib import S3Path
 import pandas as pd
+from cloudpathlib import S3Path
 from dotenv import load_dotenv
 
 DATASET_NAME = "simulated"
@@ -24,6 +24,7 @@ parser.add_argument("--num_sections", type=int, default=5)
 parser.add_argument("--num_samples_per_module", type=int, default=10)
 parser.add_argument("--num_metrics_per_module", type=int, default=50)
 parser.add_argument("--upload", action="store_true")
+parser.add_argument("--start-from", type=int, default=1, help="Start processing from this run number")
 args = parser.parse_args()
 
 # Parquet setup
@@ -81,9 +82,8 @@ def generate_metric_names(module_name, num_metrics):
     return [f"{module_name}_{random.choice(metric_types)}_{i:02d}" for i in range(1, num_metrics + 1)]
 
 
-def generate_sample_data(metric_metadatas: dict[str, dict]):
+def generate_sample_data(sample_index: int, metric_metadatas: dict[str, dict]):
     """Generate data for a single sample"""
-    sample_id = generate_random_string()
     metrics = {}
 
     for mn, mm in metric_metadatas.items():
@@ -93,7 +93,7 @@ def generate_sample_data(metric_metadatas: dict[str, dict]):
         value = min(max(value, min_val), max_val)  # Clamp value between min and max
         metrics[mn] = (generate_value_metadata(value),)
 
-    return {"sample_id": sample_id, "metrics": metrics}
+    return {"sample_id": f"sample_{sample_index}", "metrics": metrics}
 
 
 def generate_module_data(module_index, num_samples, num_metrics, num_sections):
@@ -103,7 +103,7 @@ def generate_module_data(module_index, num_samples, num_metrics, num_sections):
         metric_name = f"metric_{i}"
         metrics_metadata[metric_name] = generate_metric_metadata()
 
-    samples = [generate_sample_data(metrics_metadata) for _ in range(num_samples)]
+    samples = [generate_sample_data(sample_i, metrics_metadata) for sample_i in range(num_samples)]
     sections = [generate_section_data() for _ in range(num_sections)]
 
     return {
@@ -157,7 +157,7 @@ def generate_run_data(run_index, num_modules, num_samples_per_module, num_metric
     }
 
 
-def flatten_hierarchical_data(data):
+def flatten_hierarchical_data(run_data):
     """Convert hierarchical data to flat format for Parquet
 
     Args:
@@ -168,104 +168,105 @@ def flatten_hierarchical_data(data):
     """
     flat_records = []
 
-    run_id = data["run_id"]
-    timestamp = data["timestamp"]
-    module_id = data["module_id"]
-    module_name = data["name"]
-    module_url = data["url"]
-    module_comment = data["comment"]
-    module_anchor = data.get("anchor", "")
-    module_doi = data.get("doi", "")
+    run_id = run_data["run_id"]
+    creation_date = run_data["creation_date"]
+    for data in run_data["modules"]:
+        module_id = data["module_id"]
+        module_name = data["name"]
+        module_url = data["url"]
+        module_comment = data["comment"]
+        module_anchor = data.get("anchor", "")
+        module_doi = data.get("doi", "")
 
-    # Extract metrics metadata for later use
-    metrics_metadata = data["metrics_metadata"]
+        # Extract metrics metadata for later use
+        metrics_metadata = data["metrics_metadata"]
 
-    # Process samples data
-    for sample in data["samples"]:
-        sample_id = sample["sample_id"]
+        # Process samples data
+        for sample in data["samples"]:
+            sample_id = sample["sample_id"]
 
-        for metric_name, metric_data in sample["metrics"].items():
-            # The metric_data is a tuple with one element in your generator
-            metric_values = metric_data[0] if isinstance(metric_data, tuple) else metric_data
+            for metric_name, metric_data in sample["metrics"].items():
+                # The metric_data is a tuple with one element in your generator
+                metric_values = metric_data[0] if isinstance(metric_data, tuple) else metric_data
+
+                flat_records.append(
+                    {
+                        # Run information
+                        "run_id": run_id,
+                        "creation_date": creation_date,
+                        # Module information
+                        "module_id": module_id,
+                        "module_name": module_name,
+                        "module_url": module_url,
+                        "module_comment": module_comment,
+                        "module_anchor": module_anchor,
+                        "module_doi": module_doi,
+                        # Sample information
+                        "sample_id": sample_id,
+                        # Metric information
+                        "metric_name": metric_name,
+                        # Value metadata
+                        "val_raw": metric_values.get("val_raw"),
+                        "val_raw_type": metric_values.get("val_raw_type"),
+                        "val_mod": metric_values.get("val_mod"),
+                        "val_mod_type": metric_values.get("val_mod_type"),
+                        "val_fmt": metric_values.get("val_fmt"),
+                        # Metric metadata (from module)
+                        "metric_min": metrics_metadata.get(metric_name, {}).get("min"),
+                        "metric_max": metrics_metadata.get(metric_name, {}).get("max"),
+                        "metric_dmin": metrics_metadata.get(metric_name, {}).get("dmin"),
+                        "metric_dmax": metrics_metadata.get(metric_name, {}).get("dmax"),
+                        "metric_scale": metrics_metadata.get(metric_name, {}).get("scale"),
+                        "metric_color": metrics_metadata.get(metric_name, {}).get("color"),
+                        "metric_type": metrics_metadata.get(metric_name, {}).get("type"),
+                        "metric_namespace": metrics_metadata.get(metric_name, {}).get("namespace"),
+                        "metric_placement": metrics_metadata.get(metric_name, {}).get("placement"),
+                        "metric_shared_key": metrics_metadata.get(metric_name, {}).get("shared_key"),
+                    }
+                )
+
+        # Process sections data
+        for section in data.get("sections", []):
+            section_id = section.get("id", "")
+            section_name = section.get("name", "")
+            section_anchor = section.get("anchor", "")
 
             flat_records.append(
                 {
                     # Run information
                     "run_id": run_id,
-                    "timestamp": timestamp,
+                    "creation_date": creation_date,
                     # Module information
                     "module_id": module_id,
                     "module_name": module_name,
-                    "module_url": module_url,
-                    "module_comment": module_comment,
-                    "module_anchor": module_anchor,
-                    "module_doi": module_doi,
-                    # Sample information
-                    "sample_id": sample_id,
-                    # Metric information
-                    "metric_name": metric_name,
-                    # Value metadata
-                    "val_raw": metric_values.get("val_raw"),
-                    "val_raw_type": metric_values.get("val_raw_type"),
-                    "val_mod": metric_values.get("val_mod"),
-                    "val_mod_type": metric_values.get("val_mod_type"),
-                    "val_fmt": metric_values.get("val_fmt"),
-                    # Metric metadata (from module)
-                    "metric_min": metrics_metadata.get(metric_name, {}).get("min"),
-                    "metric_max": metrics_metadata.get(metric_name, {}).get("max"),
-                    "metric_dmin": metrics_metadata.get(metric_name, {}).get("dmin"),
-                    "metric_dmax": metrics_metadata.get(metric_name, {}).get("dmax"),
-                    "metric_scale": metrics_metadata.get(metric_name, {}).get("scale"),
-                    "metric_color": metrics_metadata.get(metric_name, {}).get("color"),
-                    "metric_type": metrics_metadata.get(metric_name, {}).get("type"),
-                    "metric_namespace": metrics_metadata.get(metric_name, {}).get("namespace"),
-                    "metric_placement": metrics_metadata.get(metric_name, {}).get("placement"),
-                    "metric_shared_key": metrics_metadata.get(metric_name, {}).get("shared_key"),
+                    # Section information (no sample or metric)
+                    "entity_type": "section",
+                    "section_id": section_id,
+                    "section_name": section_name,
+                    "section_anchor": section_anchor,
+                    "section_description": section.get("description", ""),
+                    "section_module": section.get("module", ""),
+                    "section_module_anchor": section.get("module_anchor", ""),
+                    "section_module_info": section.get("module_info", ""),
+                    "section_comment": section.get("comment", ""),
+                    "section_helptext": section.get("helptext", ""),
+                    "section_content_before_plot": section.get("content_before_plot", ""),
+                    "section_content": section.get("content", ""),
+                    "section_plot": section.get("plot", ""),
+                    "section_print_section": section.get("print_section", False),
+                    "section_plot_anchor": section.get("plot_anchor", ""),
+                    "section_ai_summary": section.get("ai_summary", ""),
                 }
             )
 
-    # Process sections data
-    for section in data.get("sections", []):
-        section_id = section.get("id", "")
-        section_name = section.get("name", "")
-        section_anchor = section.get("anchor", "")
+        # Convert to DataFrame
+        df = pd.DataFrame(flat_records)
 
-        flat_records.append(
-            {
-                # Run information
-                "run_id": run_id,
-                "timestamp": timestamp,
-                # Module information
-                "module_id": module_id,
-                "module_name": module_name,
-                # Section information (no sample or metric)
-                "entity_type": "section",
-                "section_id": section_id,
-                "section_name": section_name,
-                "section_anchor": section_anchor,
-                "section_description": section.get("description", ""),
-                "section_module": section.get("module", ""),
-                "section_module_anchor": section.get("module_anchor", ""),
-                "section_module_info": section.get("module_info", ""),
-                "section_comment": section.get("comment", ""),
-                "section_helptext": section.get("helptext", ""),
-                "section_content_before_plot": section.get("content_before_plot", ""),
-                "section_content": section.get("content", ""),
-                "section_plot": section.get("plot", ""),
-                "section_print_section": section.get("print_section", False),
-                "section_plot_anchor": section.get("plot_anchor", ""),
-                "section_ai_summary": section.get("ai_summary", ""),
-            }
-        )
-
-    # Convert to DataFrame
-    df = pd.DataFrame(flat_records)
-
-    # Add entity_type for sample metrics if not already set
-    if "entity_type" in df.columns:
-        df.loc[df["entity_type"].isna(), "entity_type"] = "sample_metric"
-    else:
-        df["entity_type"] = "sample_metric"
+        # Add entity_type for sample metrics if not already set
+        if "entity_type" in df.columns:
+            df.loc[df["entity_type"].isna(), "entity_type"] = "sample_metric"
+        else:
+            df["entity_type"] = "sample_metric"
 
     return df
 
@@ -320,86 +321,59 @@ def generate_wide_format_parquet(num_runs, num_plots, num_samples, num_metrics, 
         list: List of generated file paths
     """
     # Define column structure
-    metric_columns = [f"col_{generate_random_string(8)}" for _ in range(num_metrics)]
-
-    # Create plot_input rows
-    plot_anchors = ["plot_" + generate_random_string(15) for _ in range(num_plots)]
+    metric_columns = [f"metric_{i}" for i in range(num_metrics)]
+    plot_anchors = [f"plot_{i}" for i in range(num_plots)]
+    sample_names = [f"sample_{i}" for i in range(num_samples)]
 
     generated_files = []
 
     for run_id in range(1, num_runs + 1):
-        print(f"Generating run {run_id}/{num_runs}")
+        # Skip runs before the start-from value
+        if run_id < args.start_from:
+            continue
+
+        # Write to parquet immediately to save memory
+        output_file = output_dir / f"run_{run_id}.parquet"
+        should_generate = True
+
+        if output_file.exists():
+            # Verify the file can be read properly
+            try:
+                # Attempt to read the parquet file
+                _ = pd.read_parquet(str(output_file))
+                # If successful, skip generation
+                print(f"Skipping run {run_id} because it already exists and can be read properly")
+                should_generate = False
+            except Exception as e:
+                print(f"Found corrupted parquet file for run {run_id}, regenerating: {str(e)}")
+                # Will proceed to regenerate the file
+
+        if not should_generate:
+            continue
 
         # Generate current timestamp
         current_date = datetime.now()
 
-        plot_input_rows = [
-            {
-                "type": "run_metadata",
-                "creation_date": current_date,
-                "run_id": run_id,
-            }
-        ]
-
-        # Create plot_input rows
-        for anchor in plot_anchors:
-            plot_types = ["bar plot", "x/y line", "violin plot", "heatmap", "scatter plot", "box plot"]
-            plot_input_rows.append(
-                {
-                    "anchor": anchor,
-                    "type": "plot_input",
-                    "creation_date": current_date,
-                    "run_id": run_id,
-                    "plot_type": random.choice(plot_types),
-                    "plot_input_data": generate_random_plot_json(),
-                    "section_key": None,
-                    "sample_name": None,
-                    "data_sources": None,
-                    "multiqc_version": None,
-                    "modules": None,
-                }
-            )
+        plot_input_rows = []
 
         # Create table_row rows
         table_rows = []
-        for anchor in plot_anchors:
-            section_key = f"{anchor.replace('plot_', '')}_table"
-            for i in range(num_samples):
-                sample_name = f"ERX{random.randint(1000000, 9999999)}"
+        for s_name in sample_names:
+            # Generate metric values
+            row_data = {
+                "run_id": run_id,
+                "creation_date": current_date,
+                "type": "table_row",
+                "sample_name": s_name,
+            }
 
-                # Generate metric values
-                row_data = {
-                    "anchor": anchor,
-                    "type": "table_row",
-                    "creation_date": current_date,
-                    "plot_type": "violin plot",
-                    "plot_input_data": None,
-                    "section_key": section_key,
-                    "sample_name": sample_name,
-                    "data_sources": f"{random.uniform(1, 10):.6f}",
-                    "multiqc_version": f"{random.uniform(0, 10):.1f}",
-                    "modules": None,
-                    "run_id": run_id,
-                }
+            # Add metric columns with both val and str variants
+            for metric in metric_columns:
+                # Generate value for val column
+                value = random.uniform(0, 5)
+                row_data[metric] = value
 
-                # Add metric columns with both val and str variants
-                for metric in metric_columns:
-                    if "val" in metric:
-                        # Generate value for val column
-                        value = random.uniform(0, 5)
-                        row_data[metric] = value
-                        # Create corresponding str column
-                        str_col = metric.replace("_val", "_str")
-                        row_data[str_col] = f"{value:.1f}"
-                    elif not metric.endswith("_str"):
-                        # Generate value for non-val/non-str column
-                        value = random.uniform(0, 5)
-                        row_data[metric] = value
-                        # Create corresponding str column if it doesn't exist
-                        str_col = f"{metric}_str"
-                        row_data[str_col] = f"{value:.1f}"
-
-                table_rows.append(row_data)
+            table_rows.append(row_data)
 
         # Combine plot_input and table_row rows for this run
         run_rows = plot_input_rows + table_rows
@@ -413,18 +387,9 @@ def generate_wide_format_parquet(num_runs, num_plots, num_samples, num_metrics, 
             .astype("datetime64[us]")  # make it explicit
         )
 
-        # Ensure all metric columns exist (with NaN for plot_input rows)
-        for metric in metric_columns:
-            if metric not in df.columns:
-                df[metric] = None
-            if f"{metric}_str" not in df.columns and not metric.endswith("_str"):
-                df[f"{metric}_str"] = None
-
         # Write to parquet immediately to save memory
-        output_file = output_dir / f"multiqc_run_{run_id}.parquet"
-        if not output_file.exists():
-            df.to_parquet(str(output_file))
-            generated_files.append(str(output_file))
+        df.to_parquet(str(output_file))
+        generated_files.append(str(output_file))
 
         print(f"Generated and saved run {run_id} to {output_file}")
 
@@ -460,24 +425,104 @@ def generate_wide_format_files(
 
 
 def generate_long_format_files():
-    parquet_dir = target_path / "long_format"
-    parquet_dir.mkdir(parents=True, exist_ok=True)
+    target_path.mkdir(parents=True, exist_ok=True)
 
-    for run_number in range(args.num_runs):
-        print(f"Generating run {run_number}")
-        timestamp = (datetime.now() - timedelta(days=random.randint(0, 100))).isoformat()
+    for run_number in range(1, args.num_runs + 1):
+        # Skip runs before the start-from value
+        if run_number < args.start_from:
+            print(f"Skipping run {run_number} because it's before start-from value ({args.start_from})")
+            continue
+
+        out_path = target_path / f"run_{run_number}.parquet"
+        should_generate = True
+
+        if out_path.exists():
+            # Verify the file can be read properly
+            try:
+                # Attempt to read the parquet file
+                test_df = pd.read_parquet(str(out_path))
+                # If successful, skip generation
+                print(f"Skipping run {run_number} because it already exists and can be read properly")
+                should_generate = False
+            except Exception as e:
+                print(f"Found corrupted parquet file for run {run_number}, regenerating: {str(e)}")
+                # Will proceed to regenerate the file
+
+        if not should_generate:
+            continue
+
+        # Generate date as datetime object instead of string
+        creation_date = datetime.now() - timedelta(days=random.randint(0, 100))
         run_id = f"run_{run_number}"
-        for module_number in range(args.num_modules):
-            data = generate_module_data(module_number, args.num_samples_per_module, args.num_metrics_per_module, 5)
-            data.update(
-                {
-                    "run_id": run_id,
-                    "creation_date": timestamp,
-                }
-            )
+        print(f"Generating {run_id}, creation_date: {creation_date}, writing to {out_path}")
 
-            df = flatten_hierarchical_data(data)
-            df.to_parquet(str(parquet_dir / f"run_{run_number}_module_{module_number}.parquet"))
+        metrics_metadata = {}
+        for module_number in range(args.num_modules):
+            for metric_number in range(args.num_metrics_per_module):
+                metrics_metadata[f"metric_{metric_number}"] = generate_metric_metadata()
+
+        rows = []
+        for module_number in range(args.num_modules):
+            for sample_number in range(args.num_samples_per_module):
+                for metric_number in range(args.num_metrics_per_module):
+                    mm = metrics_metadata[f"metric_{metric_number}"]
+                    value = random.gauss(mu=50, sigma=16.67)  # sigma chosen so ~99.7% of values fall within 0-100
+                    value = min(max(value, mm["min"]), mm["max"])
+                    row = {
+                        "run_id": run_id,
+                        "creation_date": creation_date,  # Store as datetime object directly
+                        "module_name": f"module_{module_number}",
+                        "sample_name": f"sample_{sample_number}",
+                        "metric_name": f"metric_{metric_number}",
+                        "metric_min": mm["min"],
+                        "metric_max": mm["max"],
+                        "metric_dmin": mm["dmin"],
+                        "metric_dmax": mm["dmax"],
+                        "metric_scale": mm["scale"],
+                        "metric_color": mm["color"],
+                        "val_raw": value,
+                        "val_raw_type": "float",
+                    }
+                    rows.append(row)
+
+        df = pd.DataFrame(rows)
+        df["creation_date"] = (
+            pd.to_datetime(df["creation_date"], utc=True)
+            .dt.floor("us")  # tz-aware (+02:00)
+            .dt.tz_localize(None)  # …but drop the zone
+            .astype("datetime64[us]")  # make it explicit
+        )
+        out_path.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(str(out_path))
+
+
+# def generate_long_format_files_old():
+#     target_path.mkdir(parents=True, exist_ok=True)
+
+#     for run_number in range(1, args.num_runs + 1):
+#         out_path = target_path / f"run_{run_number}.parquet"
+#         if out_path.exists():
+#             print(f"Skipping run {run_number} because it already exists")
+#             continue
+
+#         print(f"Generating run {run_number}, writing to {out_path}")
+#         timestamp = (datetime.now() - timedelta(days=random.randint(0, 100))).isoformat()
+#         run_id = f"run_{run_number}"
+#         data = {
+#             "run_id": run_id,
+#             "creation_date": timestamp,
+#             "modules": [],
+#         }
+
+#         for module_number in range(args.num_modules):
+#             module_data = generate_module_data(
+#                 module_number, args.num_samples_per_module, args.num_metrics_per_module, 5
+#             )
+#             data["modules"].append(module_data)
+
+#         out_path.mkdir(parents=True, exist_ok=True)
+#         df = flatten_hierarchical_data(data)
+#         df.to_parquet(str(out_path))
 
 
 if args.format == "wide":

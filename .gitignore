@@ -182,3 +182,6 @@ node_modules/
 data/
 
 .DS_Store
+
+.pyiceberg.yaml
+.vscode

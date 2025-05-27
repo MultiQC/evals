@@ -834,12 +834,13 @@ dependencies = [
     { name = "duckdb" },
     { name = "ipykernel" },
     { name = "kaleido" },
+    { name = "natsort" },
     { name = "nbformat" },
     { name = "pandas" },
     { name = "plotly" },
     { name = "polars" },
     { name = "pyarrow" },
-    { name = "pyiceberg", extra = ["pandas", "s3fs"] },
+    { name = "pyiceberg", extra = ["glue", "pandas", "s3fs"] },
     { name = "pymongo" },
     { name = "pyspark" },
     { name = "python-dotenv" },
@@ -861,12 +862,13 @@ requires-dist = [
     { name = "duckdb" },
     { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "kaleido", specifier = "==1.0.0rc11" },
+    { name = "natsort", specifier = ">=8.4.0" },
     { name = "nbformat", specifier = ">=5.10.4" },
     { name = "pandas" },
     { name = "plotly", specifier = ">=6.0.1" },
     { name = "polars", specifier = ">=1.27.1" },
     { name = "pyarrow" },
-    { name = "pyiceberg", extras = ["pandas", "s3fs"], specifier = ">=0.9.0" },
+    { name = "pyiceberg", extras = ["glue", "pandas", "s3fs"], specifier = ">=0.9.0" },
     { name = "pymongo", specifier = ">=4.12.0" },
     { name = "pyspark", specifier = ">=3.5.5" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
@@ -877,12 +879,30 @@ requires-dist = [
 ]
 
 [[package]]
+name = "mypy-boto3-glue"
+version = "1.38.12"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/58/203aa62c114d050b1238f237cda71609bc0bacf30118908cb8a8ea4cb5dd/mypy_boto3_glue-1.38.12.tar.gz", hash = "sha256:d0c709de2f23b6a9277ec03bb0df4fefe20e32a6c748531049c17d8349bc5a09", size = 121640 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/b3/4bd3ff0ff92dbd6d41efe00ecbba5cdc81720f5ceec2fdf1e233ca696c85/mypy_boto3_glue-1.38.12-py3-none-any.whl", hash = "sha256:2fd93c0c941f5a603e6fba7c60d277053bf68a72df8e6e6532addef61267f892", size = 129132 },
+]
+
+[[package]]
 name = "narwhals"
 version = "1.36.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/65/92/503f99e2244a271aacd6c2588e0af1b59232292b217708748cdb30214dc3/narwhals-1.36.0.tar.gz", hash = "sha256:7cd860e7e066609bd8a042bb5b8e4193275532114448210a91cbd5c622b6e5eb", size = 270385 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/42/bf/fbcbd9f8676e06ed43d644a4ddbf31478a44056487578ce67f191da430cb/narwhals-1.36.0-py3-none-any.whl", hash = "sha256:e3c50dd1d769bc145f57ae17c1f0f0da6c3d397d62cdd0bb167e9b618e95c9d6", size = 331018 },
+]
+
+[[package]]
+name = "natsort"
+version = "8.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/a9/a0c57aee75f77794adaf35322f8b6404cbd0f89ad45c87197a937764b7d0/natsort-8.4.0.tar.gz", hash = "sha256:45312c4a0e5507593da193dedd04abb1469253b601ecaf63445ad80f0a1ea581", size = 76575 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/82/7a9d0550484a62c6da82858ee9419f3dd1ccc9aa1c26a1e43da3ecd20b0d/natsort-8.4.0-py3-none-any.whl", hash = "sha256:4732914fb471f56b5cce04d7bae6f164a592c7712e1c85f9ef585e197299521c", size = 38268 },
 ]
 
 [[package]]
@@ -1324,6 +1344,10 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+glue = [
+    { name = "boto3" },
+    { name = "mypy-boto3-glue" },
+]
 pandas = [
     { name = "pandas" },
     { name = "pyarrow" },
