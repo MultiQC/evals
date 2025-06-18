@@ -1,17 +1,17 @@
 import argparse
-import random
-import string
-from datetime import datetime, timedelta
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 import multiprocessing as mp
 import os
+import random
+import string
 import time
-import json
-from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict
 
-import polars as pl
 import numpy as np
+import polars as pl
 from cloudpathlib import S3Path
 from dotenv import load_dotenv
 
@@ -26,18 +26,21 @@ CHECKPOINT_FILE = "generation_checkpoint.json"
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
 
+
 def load_checkpoint() -> Dict[str, Any]:
     """Load generation checkpoint if it exists"""
     try:
-        with open(CHECKPOINT_FILE, 'r') as f:
+        with open(CHECKPOINT_FILE, "r") as f:
             return json.load(f)
     except FileNotFoundError:
         return {"last_completed_run": 0, "failed_runs": []}
 
+
 def save_checkpoint(checkpoint: Dict[str, Any]):
     """Save generation checkpoint"""
-    with open(CHECKPOINT_FILE, 'w') as f:
+    with open(CHECKPOINT_FILE, "w") as f:
         json.dump(checkpoint, f)
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--num-runs", type=int, default=10)
@@ -46,6 +49,7 @@ parser.add_argument("--num-sections", type=int, default=5)
 parser.add_argument("--num-samples-per-module", type=int, default=10)
 parser.add_argument("--num-metrics-per-module", type=int, default=50)
 parser.add_argument("--start-from", type=int, default=1, help="Start processing from this run number")
+parser.add_argument("--end-at", type=int, help="End processing at this run number (inclusive)")
 parser.add_argument("--workers", type=int, default=min(4, mp.cpu_count()), help="Number of parallel workers")
 args = parser.parse_args()
 
@@ -81,20 +85,20 @@ def generate_single_run(run_number):
     for attempt in range(MAX_RETRIES):
         try:
             print(f"Starting generation for run {run_number} (attempt {attempt + 1}/{MAX_RETRIES})")
-            
+
             # Generate date as datetime object
             creation_date = datetime.now() - timedelta(days=random.randint(0, 100))
             run_id = f"run_{run_number}"
-            
+
             # Pre-generate all metrics metadata to avoid repeated generation
             metrics_metadata = {}
             for metric_number in range(args.num_metrics_per_module):
                 metrics_metadata[f"metric_{metric_number}"] = generate_metric_metadata()
-            
+
             # Calculate total number of rows
             total_rows = args.num_modules * args.num_samples_per_module * args.num_metrics_per_module
             print(f"  Run {run_number}: Generating {total_rows:,} rows in one pass")
-            
+
             # Generate all data for this run at once
             rows = []
             for module_number in range(args.num_modules):
@@ -103,7 +107,7 @@ def generate_single_run(run_number):
                         mm = metrics_metadata[f"metric_{metric_number}"]
                         value = random.gauss(mu=50, sigma=16.67)
                         value = min(max(value, mm["min"]), mm["max"])
-                        
+
                         row = {
                             "run_id": run_id,
                             "creation_date": creation_date,
@@ -126,25 +130,27 @@ def generate_single_run(run_number):
                             "hour_partition": creation_date.hour,
                         }
                         rows.append(row)
-            
+
             print(f"  Run {run_number}: Generated {len(rows):,} rows, creating DataFrame")
-            
+
             # Create DataFrame from all rows at once
             df = pl.DataFrame(rows)
-            
+
             # Optimize data types
-            df = df.with_columns([
-                pl.col("creation_date").cast(pl.Datetime("us")),
-                pl.col("metric_scale").cast(pl.Utf8),
-                pl.col("val_raw_type").cast(pl.Utf8),
-                pl.col("date_partition").cast(pl.Utf8),
-            ])
-            
+            df = df.with_columns(
+                [
+                    pl.col("creation_date").cast(pl.Datetime("us")),
+                    pl.col("metric_scale").cast(pl.Utf8),
+                    pl.col("val_raw_type").cast(pl.Utf8),
+                    pl.col("date_partition").cast(pl.Utf8),
+                ]
+            )
+
             # Sort for better compression and query performance
             df = df.sort(["creation_date", "module_id", "sample_id", "metric_id"])
-            
+
             print(f"  Run {run_number}: DataFrame created and sorted, writing to file")
-            
+
             # Create date-partitioned structure for Iceberg
             date_str = creation_date.strftime("%Y-%m-%d")
             output_dir = target_path / f"date_partition={date_str}"
@@ -158,22 +164,17 @@ def generate_single_run(run_number):
                 row_group_size=50000,
                 use_pyarrow=True,
             )
-            
+
             # Calculate file size for reporting
             file_size_mb = out_file.stat().st_size / (1024 * 1024)
-            
+
             print(f"✓ Completed run {run_number}: {len(df):,} rows, {file_size_mb:.1f}MB -> {out_file}")
-            
+
             # Clean up memory explicitly
             del rows
             del df
-            
-            return {
-                "file": str(out_file),
-                "rows": total_rows,
-                "size_mb": file_size_mb,
-                "date": date_str
-            }
+
+            return {"file": str(out_file), "rows": total_rows, "size_mb": file_size_mb, "date": date_str}
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
                 print(f"Attempt {attempt + 1} failed for run {run_number}: {str(e)}")
@@ -186,45 +187,46 @@ def generate_single_run(run_number):
 def generate_long_format_files():
     """Generate long format files with run-level parallelization"""
     target_path.mkdir(parents=True, exist_ok=True)
-    
+
     # Load checkpoint
     checkpoint = load_checkpoint()
     last_completed = checkpoint["last_completed_run"]
     failed_runs = checkpoint["failed_runs"]
-    
+
     # Determine which runs to generate
+    end_run = args.end_at if args.end_at is not None else args.num_runs
     runs_to_generate = [
-        run_number for run_number in range(1, args.num_runs + 1)
+        run_number
+        for run_number in range(1, end_run + 1)
         if run_number > last_completed and run_number >= args.start_from
     ]
-    
+
     # Add previously failed runs
     runs_to_generate.extend([r for r in failed_runs if r >= args.start_from])
     runs_to_generate = sorted(list(set(runs_to_generate)))
-    
+
     if not runs_to_generate:
         print("No runs to generate based on checkpoint and --start-from parameter")
         return
-    
+
     total_rows_per_run = args.num_modules * args.num_samples_per_module * args.num_metrics_per_module
-    
+
     print(f"🚀 Generating {len(runs_to_generate)} runs using {args.workers} workers")
     print(f"   Rows per run: {total_rows_per_run:,}")
     print(f"   Total estimated rows: {len(runs_to_generate) * total_rows_per_run:,}")
-    print(f"   Parallelization: Each worker generates complete runs")
+    print("   Parallelization: Each worker generates complete runs")
     print(f"   Checkpoint: Last completed run {last_completed}")
     print(f"   Failed runs to retry: {len(failed_runs)}")
-    
+
     # Use ThreadPoolExecutor to parallelize across runs
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         future_to_run = {
-            executor.submit(generate_single_run, run_number): run_number
-            for run_number in runs_to_generate
+            executor.submit(generate_single_run, run_number): run_number for run_number in runs_to_generate
         }
-        
+
         completed_results = []
         failed_runs = []
-        
+
         for future in as_completed(future_to_run):
             run_number = future_to_run[future]
             try:
@@ -240,14 +242,14 @@ def generate_long_format_files():
                 failed_runs.append(run_number)
                 checkpoint["failed_runs"] = failed_runs
                 save_checkpoint(checkpoint)
-    
+
     # Print comprehensive summary
     if completed_results:
         total_rows = sum(r["rows"] for r in completed_results)
         total_size_mb = sum(r["size_mb"] for r in completed_results)
         unique_dates = len(set(r["date"] for r in completed_results))
-        
-        print(f"\n📊 Generation Summary:")
+
+        print("\n📊 Generation Summary:")
         print(f"   ✅ Files created: {len(completed_results)}")
         print(f"   📈 Total rows: {total_rows:,}")
         print(f"   💾 Total size: {total_size_mb:.1f} MB ({total_size_mb/1024:.2f} GB)")
@@ -255,24 +257,24 @@ def generate_long_format_files():
         print(f"   📊 Avg rows/file: {total_rows/len(completed_results):,.0f}")
         print(f"   📦 Avg size/file: {total_size_mb/len(completed_results):.1f} MB")
         print(f"   ❌ Failed runs: {len(failed_runs)}")
-        
+
         if failed_runs:
             print(f"   🔄 Failed run numbers: {failed_runs}")
-        
+
         # Sample a file for schema verification
         sample_result = completed_results[0]
         sample_df = pl.read_parquet(sample_result["file"])
-        
-        print(f"\n🔍 Schema Preview:")
+
+        print("\n🔍 Schema Preview:")
         for name, dtype in sample_df.schema.items():
             print(f"   {name}: {dtype}")
-        
-        print(f"\n🎯 Optimization Benefits:")
-        print(f"   - Single-pass generation per run (no batching overhead)")
+
+        print("\n🎯 Optimization Benefits:")
+        print("   - Single-pass generation per run (no batching overhead)")
         print(f"   - Parallel processing across {args.workers} workers")
-        print(f"   - Memory efficient (cleanup after each run)")
-        print(f"   - Date-partitioned for Iceberg optimization")
+        print("   - Memory efficient (cleanup after each run)")
+        print("   - Date-partitioned for Iceberg optimization")
 
 
 if __name__ == "__main__":
-    generate_long_format_files() 
+    generate_long_format_files()
