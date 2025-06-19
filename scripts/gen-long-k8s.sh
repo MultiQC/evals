@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Total number of runs to generate
-TOTAL_RUNS=100000
+TOTAL_RUNS=1000000
 RUNS_PER_JOB=5000
 
 # Calculate number of jobs needed
@@ -35,4 +35,4 @@ for i in $(seq 1 $NUM_JOBS); do
     rm "scripts/gen-long-job$i.yaml"
 done
 
-echo "All jobs submitted. Monitor progress with: kubectl get pods -n vlad-dev | grep gen-long-job" 
+echo "All jobs submitted. Monitor progress with: kubectl get pods -n vlad-dev | grep gen-long-job"

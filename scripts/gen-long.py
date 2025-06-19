@@ -27,6 +27,16 @@ MAX_RETRIES = 3
 RETRY_DELAY = 5  # seconds
 
 
+def get_timestamp():
+    """Get current timestamp in a readable format"""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log(message):
+    """Print message with timestamp prefix"""
+    print(f"[{get_timestamp()}] {message}")
+
+
 def load_checkpoint() -> Dict[str, Any]:
     """Load generation checkpoint if it exists"""
     try:
@@ -84,7 +94,7 @@ def generate_single_run(run_number):
     """Generate data for a single run - optimized for single-pass generation"""
     for attempt in range(MAX_RETRIES):
         try:
-            print(f"Starting generation for run {run_number} (attempt {attempt + 1}/{MAX_RETRIES})")
+            log(f"Starting generation for run {run_number} (attempt {attempt + 1}/{MAX_RETRIES})")
 
             # Generate date as datetime object
             creation_date = datetime.now() - timedelta(days=random.randint(0, 100))
@@ -97,7 +107,7 @@ def generate_single_run(run_number):
 
             # Calculate total number of rows
             total_rows = args.num_modules * args.num_samples_per_module * args.num_metrics_per_module
-            print(f"  Run {run_number}: Generating {total_rows:,} rows in one pass")
+            log(f"  Run {run_number}: Generating {total_rows:,} rows in one pass")
 
             # Generate all data for this run at once
             rows = []
@@ -132,7 +142,7 @@ def generate_single_run(run_number):
                         }
                         rows.append(row)
 
-            print(f"  Run {run_number}: Generated {len(rows):,} rows, creating DataFrame")
+            log(f"  Run {run_number}: Generated {len(rows):,} rows, creating DataFrame")
 
             # Create DataFrame from all rows at once
             df = pl.DataFrame(rows)
@@ -150,7 +160,7 @@ def generate_single_run(run_number):
             # Sort for better compression and query performance
             df = df.sort(["creation_date", "module_id", "sample_id", "metric_id"])
 
-            print(f"  Run {run_number}: DataFrame created and sorted, writing to file")
+            log(f"  Run {run_number}: DataFrame created and sorted, writing to file")
 
             # Create date-partitioned structure for Iceberg
             date_str = creation_date.strftime("%Y-%m-%d")
@@ -169,7 +179,7 @@ def generate_single_run(run_number):
             # Calculate file size for reporting
             file_size_mb = out_file.stat().st_size / (1024 * 1024)
 
-            print(f"✓ Completed run {run_number}: {len(df):,} rows, {file_size_mb:.1f}MB -> {out_file}")
+            log(f"✓ Completed run {run_number}: {len(df):,} rows, {file_size_mb:.1f}MB -> {out_file}")
 
             # Clean up memory explicitly
             del rows
@@ -178,8 +188,8 @@ def generate_single_run(run_number):
             return {"file": str(out_file), "rows": total_rows, "size_mb": file_size_mb, "date": date_str}
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
-                print(f"Attempt {attempt + 1} failed for run {run_number}: {str(e)}")
-                print(f"Retrying in {RETRY_DELAY} seconds...")
+                log(f"Attempt {attempt + 1} failed for run {run_number}: {str(e)}")
+                log(f"Retrying in {RETRY_DELAY} seconds...")
                 time.sleep(RETRY_DELAY)
             else:
                 raise Exception(f"Failed to generate run {run_number} after {MAX_RETRIES} attempts: {str(e)}")
@@ -207,17 +217,17 @@ def generate_long_format_files():
     runs_to_generate = sorted(list(set(runs_to_generate)))
 
     if not runs_to_generate:
-        print("No runs to generate based on checkpoint and --start-from parameter")
+        log("No runs to generate based on checkpoint and --start-from parameter")
         return
 
     total_rows_per_run = args.num_modules * args.num_samples_per_module * args.num_metrics_per_module
 
-    print(f"🚀 Generating {len(runs_to_generate)} runs using {args.workers} workers")
-    print(f"   Rows per run: {total_rows_per_run:,}")
-    print(f"   Total estimated rows: {len(runs_to_generate) * total_rows_per_run:,}")
-    print("   Parallelization: Each worker generates complete runs")
-    print(f"   Checkpoint: Last completed run {last_completed}")
-    print(f"   Failed runs to retry: {len(failed_runs)}")
+    log(f"🚀 Generating {len(runs_to_generate)} runs using {args.workers} workers")
+    log(f"   Rows per run: {total_rows_per_run:,}")
+    log(f"   Total estimated rows: {len(runs_to_generate) * total_rows_per_run:,}")
+    log("   Parallelization: Each worker generates complete runs")
+    log(f"   Checkpoint: Last completed run {last_completed}")
+    log(f"   Failed runs to retry: {len(failed_runs)}")
 
     # Use ThreadPoolExecutor to parallelize across runs
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -237,9 +247,9 @@ def generate_long_format_files():
                 if run_number in checkpoint["failed_runs"]:
                     checkpoint["failed_runs"].remove(run_number)
                 save_checkpoint(checkpoint)
-                print(f"🎉 Worker completed run {run_number}")
+                log(f"🎉 Worker completed run {run_number}")
             except Exception as exc:
-                print(f"❌ Run {run_number} failed: {exc}")
+                log(f"❌ Run {run_number} failed: {exc}")
                 failed_runs.append(run_number)
                 checkpoint["failed_runs"] = failed_runs
                 save_checkpoint(checkpoint)
@@ -250,31 +260,31 @@ def generate_long_format_files():
         total_size_mb = sum(r["size_mb"] for r in completed_results)
         unique_dates = len(set(r["date"] for r in completed_results))
 
-        print("\n📊 Generation Summary:")
-        print(f"   ✅ Files created: {len(completed_results)}")
-        print(f"   📈 Total rows: {total_rows:,}")
-        print(f"   💾 Total size: {total_size_mb:.1f} MB ({total_size_mb/1024:.2f} GB)")
-        print(f"   📅 Unique dates: {unique_dates}")
-        print(f"   📊 Avg rows/file: {total_rows/len(completed_results):,.0f}")
-        print(f"   📦 Avg size/file: {total_size_mb/len(completed_results):.1f} MB")
-        print(f"   ❌ Failed runs: {len(failed_runs)}")
+        log("\n📊 Generation Summary:")
+        log(f"   ✅ Files created: {len(completed_results)}")
+        log(f"   📈 Total rows: {total_rows:,}")
+        log(f"   💾 Total size: {total_size_mb:.1f} MB ({total_size_mb/1024:.2f} GB)")
+        log(f"   📅 Unique dates: {unique_dates}")
+        log(f"   📊 Avg rows/file: {total_rows/len(completed_results):,.0f}")
+        log(f"   📦 Avg size/file: {total_size_mb/len(completed_results):.1f} MB")
+        log(f"   ❌ Failed runs: {len(failed_runs)}")
 
         if failed_runs:
-            print(f"   🔄 Failed run numbers: {failed_runs}")
+            log(f"   🔄 Failed run numbers: {failed_runs}")
 
         # Sample a file for schema verification
         sample_result = completed_results[0]
         sample_df = pl.read_parquet(sample_result["file"])
 
-        print("\n🔍 Schema Preview:")
+        log("\n🔍 Schema Preview:")
         for name, dtype in sample_df.schema.items():
-            print(f"   {name}: {dtype}")
+            log(f"   {name}: {dtype}")
 
-        print("\n🎯 Optimization Benefits:")
-        print("   - Single-pass generation per run (no batching overhead)")
-        print(f"   - Parallel processing across {args.workers} workers")
-        print("   - Memory efficient (cleanup after each run)")
-        print("   - Date-partitioned for Iceberg optimization")
+        log("\n🎯 Optimization Benefits:")
+        log("   - Single-pass generation per run (no batching overhead)")
+        log(f"   - Parallel processing across {args.workers} workers")
+        log("   - Memory efficient (cleanup after each run)")
+        log("   - Date-partitioned for Iceberg optimization")
 
 
 if __name__ == "__main__":
