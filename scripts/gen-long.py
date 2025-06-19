@@ -105,7 +105,8 @@ def generate_single_run(run_number):
                 for sample_number in range(args.num_samples_per_module):
                     for metric_number in range(args.num_metrics_per_module):
                         mm = metrics_metadata[f"metric_{metric_number}"]
-                        value = random.gauss(mu=50, sigma=16.67)
+                        center = random.uniform(mm["min"], mm["max"])
+                        value = random.gauss(mu=center, sigma=16.67)
                         value = min(max(value, mm["min"]), mm["max"])
 
                         row = {

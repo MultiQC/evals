@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: data-generation-pod-4cpus-job${JOB_SUFFIX}
+  name: gen-long-job${JOB_SUFFIX}
   namespace: vlad-dev
 spec:
   containers:
@@ -16,7 +16,7 @@ spec:
           git clone https://github.com/MultiQC/evals.git && \
           cd evals && \
           echo "Verifying AWS configuration..." && \
-          python scripts/gen-long.py --num-runs 100000 --workers 64 --start-from ${START_FROM} --end-at ${END_AT}
+          python scripts/gen-long.py --num-runs ${TOTAL_RUNS} --workers 4 --start-from ${START_FROM} --end-at ${END_AT}
       env:
         - name: AWS_ACCESS_KEY_ID
           valueFrom:
@@ -37,9 +37,9 @@ spec:
           value: "eu-west-2"
       resources:
         requests:
-          memory: "4Gi"
-          cpu: "4"
-        limits:
           memory: "16Gi"
+          cpu: "8"
+        limits:
+          memory: "32Gi"
           cpu: "16"
   restartPolicy: Never
