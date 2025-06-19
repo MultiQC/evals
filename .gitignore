@@ -185,3 +185,5 @@ data/
 
 .pyiceberg.yaml
 .vscode
+
+scripts/aws-credentials-secret.yaml
